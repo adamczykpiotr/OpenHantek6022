@@ -185,7 +185,7 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   macos-arm:
-    runs-on: macos-13-xlarge
+    runs-on: macos-13-arm64
     steps:
 
     # --- Clone the latest commit ---
