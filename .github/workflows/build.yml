@@ -184,6 +184,91 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  macos-arm:
+    runs-on: macos-13-xlarge
+    steps:
+
+    # --- Clone the latest commit ---
+    - name: Checkout
+      uses: actions/checkout@v3
+      with:
+        fetch-tags: true
+        submodules: recursive
+        fetch-depth: 0
+
+    # --- Config git and get the version from "git describe" ---
+    - name: Config Git
+      id: config_git
+      shell: bash
+      run: |
+        git config user.email "Ho-Ro@users.noreply.github.com"
+        git config user.name "Ho-Ro"
+        git fetch --prune --unshallow --tags || true
+        git submodule update --init --recursive
+        echo "git_describe=$(git describe)"
+        echo "git_describe=$(git describe)" >> $GITHUB_OUTPUT
+
+    - name: Install macOS Build Requirements
+      run: |
+        mkdir build
+        #brew update
+        brew install qt5 fftw binutils create-dmg || true
+        #ls -lR /usr/local/opt/gcc/lib/gcc
+        # the next two commands (hack from @warpme) fix #314
+        #mkdir -p /usr/local/opt/qt5/lib/libgcc_s.1.1.dylib.framework
+        #ln -sf /usr/local/opt/gcc/lib/gcc/11/libgcc_s.1.1.dylib \
+        #  /usr/local/opt/qt5/lib/libgcc_s.1.1.dylib.framework/libgcc_s.1.1.dylib
+        #ls -lR /usr/local/opt/qt5/lib/libgcc_s.1.1.dylib.framework
+
+    - name: macOS Build
+      # GitHub hosts macOS runners in GitHub's own macOS Cloud:
+      # 3-core CPU, 14 GB of RAM memory, 14 GB of SSD disk space
+      working-directory: ${{github.workspace}}/build
+      run: |
+        cp ../CHANGELOG changelog
+        cmake .. -DCMAKE_BUILD_TYPE=$BUILD_TYPE -DCMAKE_PREFIX_PATH=$(brew --prefix qt5)
+        make -j12
+        sudo make -j12 package
+        if test -d openhantek/OpenHantek.app; then
+          export PATH=$(brew --prefix qt5)/bin:${PATH}
+          cd openhantek
+          macdeployqt OpenHantek.app -always-overwrite -verbose=1
+          python ../../utils/macdeployqtfix/macdeployqtfix.py \
+            --quiet OpenHantek.app/Contents/MacOS/OpenHantek $(brew --prefix qt5)
+          create-dmg --volname OpenHantek --volicon ../../openhantek/res/images/OpenHantek.icns \
+            --window-pos 200 120 --window-size 800 400 --icon-size 100 --icon "OpenHantek.app" 200 190 \
+            --skip-jenkins --hide-extension "OpenHantek.app" --app-drop-link 600 185 \
+            --eula ../../LICENSE OpenHantek.dmg OpenHantek.app
+          cd ..
+        else
+          true
+        fi
+        if test -d openhantek/OpenHantek.app; then
+          cd openhantek ; sudo tar -czf ../packages/openhantek_*_osx_*.tar.gz OpenHantek.app
+          if test -f OpenHantek.dmg; then
+            sudo mv OpenHantek.dmg ../packages/$(basename ../packages/openhantek_*_osx_*.tar.gz .tar.gz).dmg
+          fi
+          cd ..
+          ls -l packages
+        else
+          true
+        fi
+
+    - name: Upload macOS Artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: openhantek_${{ steps.config_git.outputs.git_describe }}_osx_arm
+        path: ${{github.workspace}}/build/packages/*
+
+    - name: Upload macOS Release Assets
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v1
+      with:
+        prerelease: true
+        files: ./build/packages/*
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
 
 # ---------------------------
 # --- Windows MINGW steps ---
